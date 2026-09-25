@@ -1,0 +1,187 @@
+{
+ "dataset": "hao-li/AIDev v4 (pull_request, pr_commit_details)",
+ "classes": {
+  "OpenAI_Codex": {
+   "code": 25945,
+   "tests": 4876,
+   "docs": 2101,
+   "never": 2504,
+   "deps": 63,
+   "deps_patch": 15
+  },
+  "Copilot": {
+   "code": 14507,
+   "never": 5188,
+   "docs": 1433,
+   "deps": 103,
+   "tests": 272,
+   "deps_patch": 34
+  },
+  "Devin": {
+   "code": 4725,
+   "never": 831,
+   "docs": 470,
+   "deps": 38,
+   "tests": 77,
+   "deps_patch": 19
+  },
+  "Cursor": {
+   "never": 502,
+   "code": 3162,
+   "docs": 314,
+   "tests": 53,
+   "deps": 19,
+   "deps_patch": 4
+  },
+  "Claude_Code": {
+   "code": 1276,
+   "never": 540,
+   "docs": 72,
+   "tests": 19,
+   "deps": 3,
+   "deps_patch": 3
+  },
+  "Google_Jules": {
+   "docs": 42,
+   "never": 90,
+   "code": 345,
+   "tests": 5,
+   "deps": 3,
+   "deps_patch": 1
+  }
+ },
+ "merged_classes": {
+  "OpenAI_Codex": {
+   "code": 21104,
+   "tests": 4465,
+   "docs": 1893,
+   "deps": 45,
+   "never": 1911,
+   "deps_patch": 12
+  },
+  "Copilot": {
+   "code": 7130,
+   "docs": 968,
+   "never": 3572,
+   "deps": 44,
+   "tests": 148,
+   "deps_patch": 25
+  },
+  "Devin": {
+   "code": 2462,
+   "never": 567,
+   "docs": 305,
+   "tests": 37,
+   "deps": 19,
+   "deps_patch": 10
+  },
+  "Cursor": {
+   "code": 1641,
+   "docs": 155,
+   "never": 294,
+   "tests": 20,
+   "deps": 13,
+   "deps_patch": 3
+  },
+  "Claude_Code": {
+   "code": 843,
+   "never": 345,
+   "docs": 51,
+   "tests": 11,
+   "deps": 1,
+   "deps_patch": 2
+  },
+  "Google_Jules": {
+   "docs": 25,
+   "never": 52,
+   "code": 202,
+   "tests": 1,
+   "deps": 2,
+   "deps_patch": 1
+  }
+ },
+ "touches": {
+  "OpenAI_Codex": {
+   "CI config": 1746,
+   "agent instructions / MCP": 846
+  },
+  "Copilot": {
+   "CI config": 3579,
+   "agent instructions / MCP": 1930
+  },
+  "Devin": {
+   "agent instructions / MCP": 135,
+   "CI config": 689
+  },
+  "Cursor": {
+   "CI config": 339,
+   "agent instructions / MCP": 187
+  },
+  "Claude_Code": {
+   "agent instructions / MCP": 323,
+   "CI config": 272
+  },
+  "Google_Jules": {
+   "CI config": 67,
+   "agent instructions / MCP": 17
+  }
+ },
+ "detonate_findings": {
+  "high mcp_command": 76,
+  "medium unseen": 251,
+  "info directive": 148,
+  "medium directive": 15,
+  "high directive": 40
+ },
+ "detonate_prs_by_worst_finding": {
+  "clean": 3226,
+  "high": 74,
+  "medium": 50,
+  "info": 88
+ },
+ "without_file_rows": 2023,
+ "examples": {
+  "Google_Jules": [
+   "3468308775: .github/copilot-instructions.md",
+   "3466543153: GEMINI.md",
+   "3428004109: GEMINI.md",
+   "3346589984: AGENTS.md",
+   "3346828997: AGENTS.md"
+  ],
+  "Copilot": [
+   "3084597647: .github/copilot-instructions.md, .vscode/mcp.json",
+   "3084876668: .github/copilot-instructions.md",
+   "3370404562: .github/copilot-instructions.md",
+   "3463427776: .github/copilot-instructions.md, .github/instructions/buffer-indicators.instructions.md, .github/instructions/catalog.in",
+   "3160615563: .github/copilot-instructions.md"
+  ],
+  "Devin": [
+   "2870344282: .cursor/rules/file-structure.mdc, .cursor/rules/mobile.mdc, .cursor/rules/web-app.mdc, .cursor/rules/ai-sdk-integration.",
+   "3174718645: CLAUDE.md, .claude/commands/commit-and-pr.md, .claude/commands/commit.md, .claude/commands/create-command.md, .claude/co",
+   "3174838352: .cursor/rules/review.mdc",
+   "3175880560: .cursor/rules/review.mdc",
+   "3275882982: .claude/commands/create-internal-issue.md"
+  ],
+  "Claude_Code": [
+   "3291383129: CLAUDE.md",
+   "3291797426: .cursorrules",
+   "3291823984: .claude/settings.local.json, CLAUDE.md",
+   "3293059634: .claude/checkpoints/task-1754342203.json, .claude/checkpoints/task-1754342204.json, .claude/checkpoints/task-1754342205.",
+   "3189507528: CLAUDE.md"
+  ],
+  "OpenAI_Codex": [
+   "3070948799: AGENTS.md",
+   "3090117167: AGENTS.md",
+   "3234785818: .github/copilot-instructions.md, AGENTS.md, CLAUDE.md",
+   "3103366848: AGENTS.md",
+   "3127143865: AGENTS.md"
+  ],
+  "Cursor": [
+   "3266956412: CLAUDE.md",
+   "3131982797: .cursor/rules/adding-new-tools.mdc",
+   "3134283496: .cursor/rules/adding-new-tools.md, .cursor/rules/coding-practices.md, .cursor/rules/adding-new-tools.mdc, .cursor/rules/",
+   "3134439291: .cursor/rules/coding-practices.mdc, .cursorrules",
+   "3230508229: .cursor/rules/python_tests.mdc"
+  ]
+ }
+}
