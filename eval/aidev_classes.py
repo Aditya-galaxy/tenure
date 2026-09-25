@@ -86,6 +86,7 @@ def main() -> int:
     detonate_prs: Counter = Counter()          # PRs by the most severe finding
     examples: dict[str, list[str]] = defaultdict(list)
     without_files = 0
+    per_pr: dict[int, str] = {}                  # for the replay (aidev_replay.py)
 
     for pr_id, agent in agent_of.items():
         f = by_pr.get(pr_id)
@@ -95,6 +96,7 @@ def main() -> int:
         changed = [ChangedFile(name, status or "modified", add, dele, "\n".join(parts) if parts else None)
                    for name, (status, add, dele, parts) in f.items()]
         cls = classify(changed, policy).change_class
+        per_pr[pr_id] = cls
         classes[agent][cls] += 1
         if pr_id in merged:
             merged_classes[agent][cls] += 1
@@ -151,6 +153,7 @@ def main() -> int:
         "examples": dict(examples),
     }, indent=1), encoding="utf-8")
     (OUT / "aidev_part_a.md").write_text(table + "\n", encoding="utf-8")
+    (DATA / "pr_classes.json").write_text(json.dumps(per_pr), encoding="utf-8")
     print(f"\n  written: {OUT.relative_to(ROOT)}/aidev_part_a.json and .md")
     return 0
 

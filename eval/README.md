@@ -85,3 +85,69 @@ doesn't depend on wording.
 - The classes come from paths and diffs alone. Part A says nothing about
   whether these PRs were *good*. Part B, which replays merges and later reverts
   per agent, is where outcomes come in.
+
+## Part B: replaying real merges and real reverts (`aidev_replay.py`)
+
+```
+GH_TOKEN=$(gh auth token) python eval/aidev_reverts.py   # ~45 min, cached under data/aidev/github/
+python eval/aidev_replay.py                               # seconds
+```
+
+**What this measures.** The sample is every repository with at least 20 merged agent PRs: 314 repos, of which
+309 are still reachable, holding 34,891 merged agent PRs. For each of them, `aidev_reverts.py` asks GitHub which merged agent PRs were
+later reverted. It checks both revert PRs ("Reverts owner/repo#N") and `git revert` commits
+("This reverts commit …"), and ties each revert back to its PR. That finds **212 PRs reverted within
+30 days of merging**.
+
+`aidev_replay.py` then replays every merge in time order under each policy in
+[`replay.py`](replay.py). A policy learns about a revert only when the revert
+happens, so it can't use next month's revert to hold a PR today. Full tables, including per-agent and per-class revert rates, are in
+[`results/aidev_part_b.md`](results/aidev_part_b.md).
+
+| Policy | merged without a person | later reverted among them | leak rate | reverted PRs a person saw first |
+|---|---:|---:|---:|---:|
+| merge when green | 34,891 (100%) | 212 | 0.61% | 0% |
+| path rules only (Tenure's never-auto list, no earned trust) | 31,058 (89.0%) | 187 | 0.60% | 12% |
+| **Tenure**: docs, tests and patch bumps; 5 clean merges a week old earn a grant | **5,366 (15.4%)** | **1** | **0.02%** | **>99%** |
+| Tenure, same, n=10 | 5,183 (14.9%) | 0 | 0.00% | 100% |
+| Tenure, code grantable too (the verifier's job; see below) | 20,268 (58.1%) | 33 | 0.16% | 84% |
+| never auto-merge | 0 | 0 | n/a | 100% |
+
+Two repositories hold 44% of these PRs (mochilang/mochi and MontrealAI/AGI-Alpha-Agent-v0). Without them:
+merge-when-green leaks 1.07%. Tenure's conservative grants merge 3.6% without a
+person with one leak (0.14%). With code grantable, Tenure merges 40.5% at a 0.41% leak rate.
+
+**What it shows**
+
+- **Static rules don't find the risky PRs.** The never-auto list sends 11% of merges to a person but
+  catches only 12% of the PRs that were later reverted. Reverts land in ordinary code, which is exactly
+  what a path list can't judge.
+- **Earned grants are safe where they apply.** Across 5,366 docs, test and patch-bump PRs merged under a grant, one was later reverted:
+  a Devin edit to CONTRIBUTING.md, reverted two minutes after it merged. Not one of the 4,462 test-only
+  agent PRs in the sample was reverted.
+- **Revoking on revert does most of the work.** With code grantable and no verification at all, grants
+  plus revocation merge 58% of PRs without a person and still show a person 84% of the PRs that were later
+  reverted. The leak rate is a quarter of merge-when-green's. This works because reverts cluster: the first revert in a key takes the grant
+  away, and the PRs that follow wait for a person while the key earns its record back.
+  This row is an upper bound on grants alone. In the product, a code grant
+  also needs the verification agent's sandbox proof for every PR.
+- **Per-agent scoping made no measurable difference here.** Trust pooled across agents gives almost
+  the same result (throughput within 2%, at most one more leak), even though 85 of the 309 repos use more than one agent.
+  Revert rates differ across agents in this sample (Claude Code 0.26%, Copilot 0.46%, Codex 0.61%,
+  Cursor 0.82%, Devin 0.93%). The replay still doesn't show that per-agent keys prevent leaks. We keep them for
+  accountability, because a grant should name what it trusts. We don't claim them as a safety result.
+
+**Caveats**
+
+- **Revert counts are a lower bound.** Only explicit reverts are found. Fixes that quietly undo a change,
+  partial reverts made by hand, and repos that became unreachable (5) are missed. Our rates (0.3–0.9% per
+  agent) are far below the 6–15% reported by Kraishan (arXiv 2609.17598), whose definition covers broader
+  post-merge maintenance. Compare the policies with each other, not with that paper.
+- **A revert isn't always a defect.** dotnet/aspire#10334, for example, was reverted inside a dependency
+  upgrade that superseded it.
+- **There is no CI signal in the data.** Every merged PR is treated as green and as passing verification, so this
+  replay tests the grant-and-revocation layer alone.
+- **Only merged PRs are replayed.** PRs people closed without merging aren't in it. Merge-when-green would have
+  merged the green ones among them, so its real leak is likely higher than shown.
+- Maintainers are assumed to accept every grant proposal as soon as it's made, and grant expiry isn't
+  modelled.
