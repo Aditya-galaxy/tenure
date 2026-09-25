@@ -15,7 +15,7 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
 
-from . import config, outcomes
+from . import config, detonate, outcomes
 from .audit import AuditLog
 from .classify import classify
 from .commands import AUTHORITY, CommandError, execute, extract, parse
@@ -41,9 +41,11 @@ def _title(d: Decision) -> str:
     return "Held for a person: " + d.reasons[0]
 
 
-def _summary(d: Decision, audit_head: str) -> str:
+def _summary(d: Decision, audit_head: str, detonation: str | None = None) -> str:
     lines = [f"**Agent:** {d.agent} · **Change:** {d.change_class} · **Commit:** `{d.head_sha[:7]}`", ""]
     lines += [f"- {r}" for r in d.reasons]
+    if detonation:
+        lines += ["", detonation]
     lines += ["", f"Audit chain head: `{audit_head[:16]}` — recorded here so the log can't be shortened unnoticed."]
     return "\n".join(lines)
 
@@ -81,7 +83,13 @@ class Engine:
         head, base = pr["head"]["sha"], pr["base"]["sha"]
         now = self.clock()
 
-        classification = classify(inst.pull_files(a.repo, a.number), policy)
+        files = inst.pull_files(a.repo, a.number)
+        classification = classify(files, policy)
+        # A change to what agents are told gets Detonate's evidence on the check
+        # run. It never changes the verdict for the better: these files are
+        # never merged unattended; the evidence is for the person who reviews.
+        touches_instructions = any(detonate.is_instruction_file(f.path) for f in files)
+        findings = detonate.static_scan(files) if touches_instructions else []
         verification = (self.verifier.verify(a.repo, a.number, head, base, policy)
                         if classification.change_class != "never" else None)
         grants = self.store.covering(a.repo, agent, classification.change_class)
@@ -91,7 +99,8 @@ class Engine:
                           owner_has_access=lambda login: inst.role(a.repo, login) in AUTHORITY)
         self.audit.record("decision", {"repo": a.repo, "pr": a.number, "head": head, "agent": agent,
                                        "class": decision.change_class, "verdict": decision.verdict.value,
-                                       "reasons": list(decision.reasons)}, at=now)
+                                       "reasons": list(decision.reasons),
+                                       "detonate": [f.detail for f in findings]}, at=now)
 
         if decision.verdict is Verdict.AUTO_MERGE:
             try:
@@ -108,7 +117,8 @@ class Engine:
                     self.store.record_fired(grant, now=now, pr=f"{a.repo}#{a.number}")
 
         inst.check_run(a.repo, head, conclusion=_CONCLUSION[decision.verdict], title=_title(decision),
-                       summary=_summary(decision, self.audit.head))
+                       summary=_summary(decision, self.audit.head,
+                                        detonate.report(findings) if touches_instructions else None))
         return decision
 
     # ── /tenure commands ─────────────────────────────────────────────────────

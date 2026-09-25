@@ -52,6 +52,7 @@ evidence** — a revert, a broken main — without anyone having to notice.
 | `github.py` | the GitHub App: installation tokens, PR files, check runs, sha-pinned merges, maintain-vs-write roles |
 | `engine.py` | from a webhook to a decision, a check run and (only if everything holds) a merge |
 | `outcomes.py`, `ledger.py` | a revert revokes the grant that allowed the merge; a red main at the merge commit suspends it |
+| `detonate.py` | any PR touching agent instructions or MCP configs: invisible text decoded, suspicious directives, new MCP commands, all posted on the check run. The sandbox half runs the same task with the old and the new instructions and reports what only the new ones made the agent do |
 | `verify.py` | the sandbox check. Until Nebius Sandboxes are wired in, nothing is verified, so nothing merges |
 
 ```bash

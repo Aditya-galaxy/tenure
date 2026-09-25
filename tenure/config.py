@@ -38,6 +38,8 @@ ALWAYS_NEVER: tuple[str, ...] = (
     # agent will follow — markdown that must not pass as harmless docs.
     "AGENTS.md", "CLAUDE.md", "GEMINI.md", ".cursorrules", ".cursor/**", ".claude/**",
     ".windsurfrules", ".clinerules",
+    # MCP server configs name programs an agent will launch.
+    ".mcp.json", ".vscode/mcp.json",
 )
 
 DOC_PATTERNS: tuple[str, ...] = ("docs/**", "doc/**", "*.md", "*.rst", "*.adoc")
