@@ -13,8 +13,9 @@ authority is **earned per repository, per agent and per kind of change**. It
 is **granted by a named person, always expires, and is withdrawn by
 evidence** — a revert, a broken main — without anyone having to notice.
 
-> **Status: in development, private.** The policy core below is built and
-> tested. The GitHub App, sandbox verification and model integration are next.
+> **Status: in development, private.** The policy core and the GitHub App are
+> built and tested. Sandbox verification and Nemotron are next; until then,
+> every agent PR is held, which is the intended failure.
 > Built for the Nebius × NVIDIA Global AI Hackathon.
 
 ## The rules it is built on
@@ -47,6 +48,11 @@ evidence** — a revert, a broken main — without anyone having to notice.
 | `policy.py` | the pure decision: `AUTO_MERGE`, `HOLD`, `NEVER` or `IGNORE`, with every reason |
 | `commands.py`, `halt.py` | `/tenure grant · revoke · halt · resume · status` |
 | `audit.py` | tamper-evident record of every decision and change |
+| `webhook.py`, `app.py` | GitHub webhooks: signature-checked, each delivery handled once, acknowledged within GitHub's time limit |
+| `github.py` | the GitHub App: installation tokens, PR files, check runs, sha-pinned merges, maintain-vs-write roles |
+| `engine.py` | from a webhook to a decision, a check run and (only if everything holds) a merge |
+| `outcomes.py`, `ledger.py` | a revert revokes the grant that allowed the merge; a red main at the merge commit suspends it |
+| `verify.py` | the sandbox check. Until Nebius Sandboxes are wired in, nothing is verified, so nothing merges |
 
 ```bash
 pip install -e ".[dev]"
