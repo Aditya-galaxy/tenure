@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.venv/
+*.egg-info/
+# Runtime state: grants and the audit chain belong to a deployment, not the repo.
+/state/
+.env
