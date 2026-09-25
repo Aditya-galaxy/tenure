@@ -73,7 +73,7 @@ class FakeInstallation:
 
 
 class Passes:
-    def verify(self, repo, number, head_sha, base_sha, policy):
+    def verify(self, repo, number, head_sha, base_sha, policy, *, source):
         return Verification(head_sha, tests_passed=True, tests_before=13, tests_after=13, reversible=True)
 
 

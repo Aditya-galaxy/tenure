@@ -24,7 +24,7 @@ from .grants import GrantStore
 from .halt import HaltSwitch
 from .identity import agent_of
 from .ledger import Ledger, Merge
-from .policy import Decision, PullRequest, Verdict, decide
+from .policy import Decision, PullRequest, Verdict, Verification, decide
 from .verify import Unverified, Verifier
 from .webhook import BuildFinished, EvaluatePR, PRMerged, RunCommands
 
@@ -41,11 +41,13 @@ def _title(d: Decision) -> str:
     return "Held for a person: " + d.reasons[0]
 
 
-def _summary(d: Decision, audit_head: str, detonation: str | None = None) -> str:
+def _summary(d: Decision, audit_head: str, detonation: str | None = None, brief: str = "") -> str:
     lines = [f"**Agent:** {d.agent} · **Change:** {d.change_class} · **Commit:** `{d.head_sha[:7]}`", ""]
     lines += [f"- {r}" for r in d.reasons]
     if detonation:
         lines += ["", detonation]
+    if brief:
+        lines += ["", brief]
     lines += ["", f"Audit chain head: `{audit_head[:16]}` — recorded here so the log can't be shortened unnoticed."]
     return "\n".join(lines)
 
@@ -90,9 +92,16 @@ class Engine:
         # never merged unattended; the evidence is for the person who reviews.
         touches_instructions = any(detonate.is_instruction_file(f.path) for f in files)
         findings = detonate.static_scan(files) if touches_instructions else []
-        verification = (self.verifier.verify(a.repo, a.number, head, base, policy)
-                        if classification.change_class != "never" else None)
         grants = self.store.covering(a.repo, agent, classification.change_class)
+        # A sandbox run costs money and only matters when a grant could let the
+        # PR through; without one the PR is held whatever the tests say.
+        verification = None
+        if classification.change_class != "never" and grants:
+            try:
+                verification = self.verifier.verify(a.repo, a.number, head, base, policy, source=inst)
+            except Exception as exc:  # noqa: BLE001 -- any failure to verify holds, and says why
+                verification = Verification(head, tests_passed=False, tests_before=0, tests_after=0,
+                                            reversible=False, problem=f"the verifier failed ({type(exc).__name__})")
         decision = decide(PullRequest(a.repo, a.number, head), classification, agent=agent, grants=grants,
                           policy=policy, now=now, halted=self.switch.is_halted(a.repo),
                           verification=verification, flags=tuple(flags),
@@ -118,7 +127,8 @@ class Engine:
 
         inst.check_run(a.repo, head, conclusion=_CONCLUSION[decision.verdict], title=_title(decision),
                        summary=_summary(decision, self.audit.head,
-                                        detonate.report(findings) if touches_instructions else None))
+                                        detonate.report(findings) if touches_instructions else None,
+                                        verification.brief if verification else ""))
         return decision
 
     # ── /tenure commands ─────────────────────────────────────────────────────

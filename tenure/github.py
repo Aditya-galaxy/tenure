@@ -76,10 +76,10 @@ class Installation:
     app: GitHubApp
     installation_id: int
 
-    def _req(self, method: str, path: str, **kw: Any) -> httpx.Response:
+    def _req(self, method: str, path: str, *, headers: dict[str, str] | None = None, **kw: Any) -> httpx.Response:
         token = self.app.installation_token(self.installation_id)
         return self.app.http.request(method, f"{self.app.base}{path}",
-                                     headers={"Authorization": f"Bearer {token}"}, **kw)
+                                     headers={"Authorization": f"Bearer {token}", **(headers or {})}, **kw)
 
     def _json(self, method: str, path: str, ok: tuple[int, ...] = (200,), **kw: Any) -> Any:
         r = self._req(method, path, **kw)
@@ -114,6 +114,30 @@ class Installation:
         if data.get("encoding") != "base64":
             raise GitHubError(f"{path} isn't a file")
         return base64.b64decode(data["content"]).decode("utf-8")
+
+    # ── what the verification agent reads (agent.Source) ─────────────────────
+
+    def tree(self, repo: str, sha: str) -> list[str]:
+        data = self._json("GET", f"/repos/{repo}/git/trees/{sha}", params={"recursive": "1"})
+        return [e["path"] for e in data.get("tree", []) if e.get("type") == "blob"]
+
+    def tarball(self, repo: str, sha: str) -> bytes:
+        r = self._req("GET", f"/repos/{repo}/tarball/{sha}")
+        if r.status_code in (301, 302, 307) and r.headers.get("location"):
+            # The redirect carries its own short-lived token; the installation
+            # token isn't sent to the download host.
+            r = self.app.http.get(r.headers["location"], follow_redirects=True)
+        if r.status_code != 200:
+            raise GitHubError(f"couldn't download {repo} at {sha[:7]} ({r.status_code})")
+        return r.content
+
+    def compare_diff(self, repo: str, base_sha: str, head_sha: str) -> str:
+        """The PR's change exactly as of `head_sha`: from where it left the base, to that commit."""
+        r = self._req("GET", f"/repos/{repo}/compare/{base_sha}...{head_sha}",
+                      headers={"Accept": "application/vnd.github.diff"})
+        if r.status_code != 200:
+            raise GitHubError(f"couldn't read the diff {base_sha[:7]}...{head_sha[:7]} ({r.status_code})")
+        return r.text
 
     def role(self, repo: str, login: str) -> str:
         r = self._req("GET", f"/repos/{repo}/collaborators/{login}/permission")

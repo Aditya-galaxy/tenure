@@ -47,6 +47,8 @@ class Verification:
     tests_before: int
     tests_after: int
     reversible: bool           # the revert applied cleanly and the tests matched the baseline
+    problem: str | None = None  # why the sandbox couldn't establish a result; always holds
+    brief: str = ""            # for the reviewer's check run; decide() never reads it
 
 
 @dataclass(frozen=True)
@@ -91,6 +93,8 @@ def decide(pr: PullRequest, classification: Classification, *, agent: str | None
 
     if verification is None:
         held.append("not verified in a sandbox")
+    elif verification.problem:
+        held.append(f"couldn't verify in a sandbox: {verification.problem}")
     else:
         if verification.head_sha != pr.head_sha:
             held.append(f"the sandbox verified {verification.head_sha[:7]}, but the PR is now at "
