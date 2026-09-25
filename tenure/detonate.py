@@ -45,8 +45,8 @@ _MCP_FILES: tuple[str, ...] = (".mcp.json", ".vscode/mcp.json", ".cursor/mcp.jso
 
 @dataclass(frozen=True)
 class Finding:
-    severity: str            # high | medium
-    kind: str                # hidden_text | hidden_chars | directive | mcp_command | behaviour
+    severity: str            # high | medium | info
+    kind: str                # hidden_text | hidden_chars | directive | mcp_command | unseen | behaviour
     path: str
     line: int | None
     detail: str
@@ -82,6 +82,7 @@ def added_lines(patch: str | None) -> list[tuple[int, str]]:
 _BIDI = set(range(0x202A, 0x202F)) | set(range(0x2066, 0x206A))
 _ZERO_WIDTH = {0x200B, 0x200C, 0x200D, 0x2060, 0xFEFF, 0x180E}
 _TAGS = range(0xE0000, 0xE0080)
+_FLAG = re.compile("\U0001F3F4[\U000E0030-\U000E0039\U000E0061-\U000E007A]{2,6}\U000E007F")
 
 
 def _decode_tags(text: str) -> str:
@@ -90,14 +91,27 @@ def _decode_tags(text: str) -> str:
     return "".join(chr(ord(c) - 0xE0000) for c in text if ord(c) in _TAGS and 0x20 <= ord(c) - 0xE0000 < 0x7F)
 
 
+def _hides_in_latin(text: str, i: int) -> bool:
+    """A zero-width character is normal inside Persian, Indic or emoji text,
+    where it shapes letters or joins symbols. Between two ASCII letters, or at
+    the edge of an ASCII word, it only serves to hide something."""
+    before = text[i - 1] if i > 0 else " "
+    after = text[i + 1] if i + 1 < len(text) else " "
+    return (before.isascii() and before.isalpha()) or (after.isascii() and after.isalpha())
+
+
 def hidden_characters(path: str, lines: list[tuple[int, str]]) -> list[Finding]:
     findings: list[Finding] = []
     for number, text in lines:
-        smuggled = _decode_tags(text)
+        # Subdivision flags (🏴 + tag letters + cancel tag) are the one legitimate
+        # use of tag characters; anything else spelled in them was written to be unseen.
+        smuggled = _decode_tags(_FLAG.sub("", text))
         if smuggled.strip():
             findings.append(Finding("high", "hidden_text", path, number,
                                     f"invisible text that decodes to: {smuggled.strip()[:200]!r}"))
-        odd = sorted({c for c in text if ord(c) in _BIDI or ord(c) in _ZERO_WIDTH})
+        bidi = sorted({c for c in text if ord(c) in _BIDI})
+        hiding = sorted({c for i, c in enumerate(text) if ord(c) in _ZERO_WIDTH and _hides_in_latin(text, i)})
+        odd = bidi + [c for c in hiding if c not in bidi]
         if odd:
             names = ", ".join(f"U+{ord(c):04X} {unicodedata.name(c, 'unnamed')}" for c in odd[:4])
             findings.append(Finding("high", "hidden_chars", path, number, f"characters that don't display: {names}"))
@@ -106,20 +120,54 @@ def hidden_characters(path: str, lines: list[tuple[int, str]]) -> list[Finding]:
 
 # ── what the added words tell an agent to do ─────────────────────────────────
 
-_DIRECTIVES: tuple[tuple[str, str], ...] = (
-    (r"ignore (all |any )?(previous|prior|above|earlier) (instructions|rules)|disregard (the )?(previous|above)",
-     "tells the agent to ignore its other instructions"),
-    (r"(do not|don'?t|never) (mention|tell|reveal|report|disclose|log|explain)",
-     "tells the agent to keep something from the person"),
-    (r"(\.env\b|\.aws|credentials?|api[_ -]?keys?|secrets?|tokens?|ssh|id_rsa|private key|password)",
-     "refers to secrets or credentials"),
-    (r"(curl|wget|invoke-webrequest)\b[^\n]*\|\s*(sh|bash|zsh|python)|base64 (-d|--decode)",
-     "downloads and runs something, or decodes hidden content"),
-    (r"(skip|disable|remove|delete)\b[^\n]{0,30}\b(tests?|lint(ing|er)?|checks?|ci|security)",
-     "tells the agent to turn off tests or checks"),
-    (r"https?://(?!github\.com/|docs\.|localhost)[\w.-]+", "points the agent at an outside address"),
-    (r"(always|every (file|change|commit)|in all (files|code))\b[^\n]{0,60}\b(add|include|insert|import)",
-     "tells the agent to add something to everything it writes"),
+# Each pattern is an instruction to *do* something risky. Mentioning a topic
+# isn't one: measured on 3,440 real agent edits to instruction files (AIDev),
+# topic-matching flagged "Secrets should not be committed" and links to
+# conventionalcommits.org thousands of times, and a reviewer shown that much
+# noise stops reading. A line that negates the action ("don't", "never",
+# "avoid") is guidance against it and isn't flagged.
+_NEGATED = re.compile(r"\b(don'?t|do not|never|avoid|must not|should not|shouldn'?t|no need to|without)\b", re.I)
+_KEY_MATERIAL = (
+                 r"(\.env\b|\.aws\b|credentials?\b|api[_ -]?keys?\b|secrets?\b|id_rsa\b|ssh keys?\b|"
+                 r"private keys?\b|passwords?\b)")
+
+_INJECTED = r"(import|require|fetch|telemetry|analytics|beacon|tracking)\b"
+_EVERYWHERE = r"\b(every|all|each)\s+(new\s+)?(files?|modules?|functions?|components?)\b"
+_INSERT = r"\b(add|insert|inject|append|prepend|put)\b"
+# Addresses on this machine or reserved for documentation are where setup
+# guides point curl; a line that sends somewhere else is the one to read.
+_OUTSIDE = (r"https?://(?!(localhost|127\.\d+\.\d+\.\d+|0\.0\.0\.0|\[::1\]|[\w.-]*\bexample\.(com|org|net)|"
+            r"[\w.-]+\.(local|localhost|test|internal))[:/\s\"'`]|$)")
+
+# (severity, pattern, meaning, a negation in front of it means guidance against it)
+_DIRECTIVES: tuple[tuple[str, str, str, bool], ...] = (
+    ("high", r"ignore (all |any )?(previous|prior|above|earlier|other) (instructions|rules)|"
+             r"disregard (the |all )?(previous|above|prior)",
+     "tells the agent to ignore its other instructions", False),
+    # Verbs that move or reveal. "Copy .env.example to .env" and
+    # "export API_KEY=..." are setup steps, so copy and export aren't here.
+    # A CI expression like ${{ secrets.GITHUB_TOKEN }} is how workflows pass a
+    # token to a tool, not an agent handling one.
+    ("high", r"\b(read|cat|print|echo|send|post|upload|paste|transmit|forward|leak|share|exfiltrat\w*)\b(?!-)"
+             r"(?![^.\n]{0,40}\$\{\{\s*secrets\.)[^.\n]{0,40}" + _KEY_MATERIAL,
+     "tells the agent to read or move secrets", True),
+    ("high", r"\b(send|post|upload|report|forward|submit|transmit|beacon)\b[^.\n]{0,60}\bto\s+`?" + _OUTSIDE + "|"
+             r"\bcurl\b[^\n]*(-X\s*POST|\s-d\s|--data|\s-F\s|--upload-file)[^\n]*" + _OUTSIDE + "|"
+             r"\bcurl\b[^\n]*" + _OUTSIDE + r"[^\n]*(-X\s*POST|\s-d\s|--data|\s-F\s|--upload-file)",
+     "tells the agent to send something to an outside address", True),
+    # Itself a negation, so it can't be negated; "don't mention secrets in logs" is hygiene, not concealment.
+    ("medium", r"\b(do not|don'?t|never)\s+(mention|tell|reveal|disclose|report)\b(?![^.\n]{0,40}\b(logs?|secrets?|"
+               r"keys?|tokens?|passwords?|credentials?|sensitive)\b)",
+     "tells the agent to keep something from the person", False),
+    # "SKIP=hook pre-commit run" is a shell variable, not an instruction.
+    ("medium", r"^\s*[-*]?\s*(always\s+)?(skip|disable|remove|delete|comment out|bypass)\b(?!=)[^.\n]{0,30}\b"
+               r"(tests?|linting|lint checks?|type ?checks?|security (checks?|scans?)|pre-commit)\b",
+     "tells the agent to turn off tests or checks", True),
+    ("medium", _INSERT + r"[^.\n]{0,40}\b" + _INJECTED + r"[^.\n]{0,50}" + _EVERYWHERE + "|" +
+               _EVERYWHERE + r"[^.\n]{0,50}" + _INSERT + r"[^.\n]{0,40}\b" + _INJECTED,
+     "tells the agent to add a call or import to everything it writes", True),
+    ("info", r"(curl|wget|invoke-webrequest)\b[^\n]*\|\s*(sh|bash|zsh|python)\b|base64 (-d|--decode)",
+     "runs a downloaded script (often an official installer; worth a glance)", False),
 )
 
 
@@ -127,9 +175,13 @@ def directives(path: str, lines: list[tuple[int, str]]) -> list[Finding]:
     findings = []
     for number, text in lines:
         visible = "".join(c for c in text if ord(c) not in _TAGS and ord(c) not in _BIDI | _ZERO_WIDTH)
-        for pattern, meaning in _DIRECTIVES:
-            if re.search(pattern, visible, flags=re.IGNORECASE):
-                findings.append(Finding("medium", "directive", path, number, f"{meaning}: {visible.strip()[:120]!r}"))
+        for severity, pattern, meaning, negatable in _DIRECTIVES:
+            m = re.search(pattern, visible, flags=re.IGNORECASE)
+            if not m:
+                continue
+            if negatable and _NEGATED.search(visible[max(0, m.start() - 40):m.end()]):
+                continue
+            findings.append(Finding(severity, "directive", path, number, f"{meaning}: {visible.strip()[:120]!r}"))
     return findings
 
 
@@ -154,7 +206,7 @@ def static_scan(files: list[ChangedFile] | tuple[ChangedFile, ...]) -> list[Find
             continue
         lines = added_lines(f.patch)
         if f.patch is None and f.status != "removed":
-            findings.append(Finding("medium", "directive", f.path, None,
+            findings.append(Finding("medium", "unseen", f.path, None,
                                     "the diff is too large to show, so the new instructions can't be inspected"))
         findings += hidden_characters(f.path, lines) + directives(f.path, lines) + mcp_commands(f.path, lines)
     return findings
@@ -204,7 +256,7 @@ def report(findings: list[Finding]) -> str:
     """The Detonate section of a check run."""
     if not findings:
         return "**Detonate:** no hidden text, no suspicious directives, no new MCP commands in the added lines."
-    order = {"high": 0, "medium": 1}
+    order = {"high": 0, "medium": 1, "info": 2}
     rows = [f"- **{f.severity}** · `{f.path}`{f':{f.line}' if f.line else ''} — {f.detail}"
             for f in sorted(findings, key=lambda f: (order[f.severity], f.path, f.line or 0))]
     return "**Detonate found:**\n" + "\n".join(rows)
