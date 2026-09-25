@@ -7,3 +7,5 @@ __pycache__/
 # Runtime state: grants and the audit chain belong to a deployment, not the repo.
 /state/
 .env
+# Research datasets: downloaded on demand, never committed
+/data/
