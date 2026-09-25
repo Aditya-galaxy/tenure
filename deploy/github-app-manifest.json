@@ -1,0 +1,24 @@
+{
+  "name": "Tenure (dev)",
+  "url": "https://github.com/Aditya-galaxy/tenure",
+  "description": "Decides which agent-written pull requests may merge without a human, and takes that right away when a merge goes wrong.",
+  "public": false,
+  "hook_attributes": {
+    "url": "https://REPLACE-WITH-YOUR-TUNNEL/webhook",
+    "active": true
+  },
+  "redirect_url": "https://github.com/Aditya-galaxy/tenure",
+  "default_permissions": {
+    "metadata": "read",
+    "contents": "write",
+    "pull_requests": "write",
+    "checks": "write",
+    "actions": "read"
+  },
+  "default_events": [
+    "pull_request",
+    "issue_comment",
+    "workflow_run",
+    "check_suite"
+  ]
+}
