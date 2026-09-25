@@ -28,6 +28,7 @@ from .github import GitHubApp
 from .grants import GrantStore
 from .halt import HaltSwitch
 from .ledger import Ledger
+from .verify import Unverified, Verifier
 from .webhook import Deliveries, actions, signature_ok
 
 log = logging.getLogger("tenure")
@@ -73,8 +74,19 @@ def from_env() -> Starlette:
     gh = GitHubApp(os.environ["TENURE_APP_ID"], Path(os.environ["TENURE_PRIVATE_KEY_PATH"]).read_text())
     engine = Engine(gh.installation, store=GrantStore(state / "grants.json", audit),
                     switch=HaltSwitch(state / "halts.json", audit), ledger=Ledger(state / "merges.jsonl", audit),
-                    audit=audit)
+                    audit=audit, verifier=_verifier())
     return create_app(engine, os.environ.get("TENURE_WEBHOOK_SECRET", "").encode())
+
+
+def _verifier() -> Verifier:
+    """The verification agent when Nebius credentials are present; otherwise
+    nothing is verified, so every agent PR is held."""
+    if not (os.environ.get("NEBIUS_API_KEY") and os.environ.get("NEBIUS_PROJECT_ID")):
+        return Unverified()
+    from .agent import VerificationAgent
+    from .model import TokenFactory
+    from .sandbox import ContreeSandbox
+    return VerificationAgent(ContreeSandbox(), TokenFactory.from_env())
 
 
 def main() -> None:

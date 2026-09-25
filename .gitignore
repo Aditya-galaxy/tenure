@@ -9,3 +9,4 @@ __pycache__/
 .env
 # Research datasets: downloaded on demand, never committed
 /data/
+/build/

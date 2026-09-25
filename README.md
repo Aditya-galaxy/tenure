@@ -13,9 +13,10 @@ authority is **earned per repository, per agent and per kind of change**. It
 is **granted by a named person, always expires, and is withdrawn by
 evidence** — a revert, a broken main — without anyone having to notice.
 
-> **Status: in development, private.** The policy core and the GitHub App are
-> built and tested. Sandbox verification and Nemotron are next; until then,
-> every agent PR is held, which is the intended failure.
+> **Status: in development, private.** The policy core, the GitHub App and the
+> verification agent are built and tested. The agent runs on Nemotron and Nebius
+> Sandboxes once credentials are set. Until then, every agent PR is held, which
+> is the intended failure.
 > Built for the Nebius × NVIDIA Global AI Hackathon.
 
 ## The rules it is built on
@@ -53,12 +54,21 @@ evidence** — a revert, a broken main — without anyone having to notice.
 | `engine.py` | from a webhook to a decision, a check run and (only if everything holds) a merge |
 | `outcomes.py`, `ledger.py` | a revert revokes the grant that allowed the merge; a red main at the merge commit suspends it |
 | `detonate.py` | any PR touching agent instructions or MCP configs: invisible text decoded, suspicious directives, new MCP commands, all posted on the check run. The sandbox half runs the same task with the old and the new instructions and reports what only the new ones made the agent do |
-| `verify.py` | the sandbox check. Until Nebius Sandboxes are wired in, nothing is verified, so nothing merges |
+| `agent.py` | the verification agent. Nemotron plans a build and test recipe from the **base branch only** and repairs it when a step fails. From one sandbox checkpoint, Tenure then runs the tests at the base, with the PR applied, and after `git revert`, and judges the runs by exit codes and the test framework's own summary, never by the model |
+| `sandbox.py`, `model.py` | Nebius Token Factory Sandboxes (branching snapshots) and Nemotron through Token Factory's OpenAI-compatible API. No secrets go into a sandbox |
+| `verify.py` | the verifier interface. Without `NEBIUS_API_KEY` and `NEBIUS_PROJECT_ID`, nothing is verified, so nothing merges |
 
 ```bash
-pip install -e ".[dev]"
+pip install -e ".[dev,sandbox]"
 pytest -q
+
+# the verification agent on one real PR (reads GitHub, writes nothing)
+export NEBIUS_API_KEY=... NEBIUS_PROJECT_ID=...
+GH_TOKEN=$(gh auth token) python tools/verify_pr.py owner/repo 12
 ```
+
+The agent only verifies a PR a grant could let through, because sandbox time costs
+money and without a grant the PR is held whatever its tests say.
 
 Never-auto by default, in every repository: CI configuration, `.tenure.yml`,
 `CODEOWNERS`, `.gitmodules`, licence files, and **instruction files for coding
