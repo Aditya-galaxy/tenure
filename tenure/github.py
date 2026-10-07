@@ -70,6 +70,14 @@ class GitHubApp:
     def installation(self, installation_id: int) -> Installation:
         return Installation(self, installation_id)
 
+    def set_webhook(self, *, url: str | None = None, secret: str | None = None) -> None:
+        """Point the App's webhook somewhere new, or change its signing secret."""
+        body = {k: v for k, v in (("url", url), ("secret", secret), ("content_type", "json")) if v}
+        r = self.http.patch(f"{self.base}/app/hook/config", json=body,
+                            headers={"Authorization": f"Bearer {self.app_jwt()}"})
+        if r.status_code != 200:
+            raise GitHubError(f"couldn't update the App's webhook ({r.status_code})")
+
 
 @dataclass
 class Installation:
