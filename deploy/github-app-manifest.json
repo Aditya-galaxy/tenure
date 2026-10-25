@@ -13,7 +13,8 @@
     "contents": "write",
     "pull_requests": "write",
     "checks": "write",
-    "actions": "read"
+    "actions": "read",
+    "issues": "read"
   },
   "default_events": [
     "pull_request",

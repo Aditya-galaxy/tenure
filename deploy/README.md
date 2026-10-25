@@ -9,6 +9,7 @@ manifest in this folder asks for the least that the code uses:
 | Pull requests: write | reading PR files, commenting |
 | Checks: write | the Tenure check run on each agent PR |
 | Actions: read, Metadata: read | seeing build results on the default branch |
+| Issues: read | GitHub delivers comment events (`/tenure` commands on a PR) only to Apps that can read issues |
 
 Events: `pull_request`, `issue_comment`, `workflow_run`, `check_suite`, which
 are exactly the ones `tenure/webhook.py` handles.
