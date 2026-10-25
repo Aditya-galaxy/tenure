@@ -46,10 +46,19 @@ are exactly the ones `tenure/webhook.py` handles.
    ```
 
    Run it again with the deployed address once Tenure is on Nebius.
-5. **Let Tenure merge past the review rule, and nothing else.** On the
-   repository's `main`, create two rulesets:
-   - **Ruleset A:** requires a pull request with 1 approval. *Bypass list:* the Tenure App.
-   - **Ruleset B:** requires the CI status check. *No bypass*, so even Tenure's merges need green CI.
+5. **Let Tenure merge past the review rule, and nothing else.** The two
+   rulesets are in `deploy/rulesets/`; a repository admin applies them with:
+
+   ```bash
+   gh api -X POST repos/OWNER/REPO/rulesets --input deploy/rulesets/review-or-grant.json
+   gh api -X POST repos/OWNER/REPO/rulesets --input deploy/rulesets/ci-must-pass.json
+   ```
+
+   Set the App's id (`actor_id` 5468261 there) and the required check's name
+   for your repository first. Repository admins may bypass both, so the
+   people who own the repository keep working as they did.
+   - **Review or grant** (`review-or-grant.json`): a pull request with 1 approval. *Bypass:* the Tenure App, and admins.
+   - **CI must pass** (`ci-must-pass.json`): the CI check. *No bypass for Tenure*, so even its merges need green CI.
 
 The private key and the webhook secret are credentials: keep them out of the
 repository and out of chat.

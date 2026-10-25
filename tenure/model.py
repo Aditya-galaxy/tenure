@@ -13,6 +13,9 @@ from __future__ import annotations
 import json
 import os
 import re
+import threading
+from datetime import date
+from pathlib import Path
 from typing import Any, Protocol
 
 import httpx
@@ -34,10 +37,42 @@ class Model(Protocol):
     def complete(self, system: str, user: str, *, max_tokens: int = 4000) -> str: ...
 
 
+class DailyBudget:
+    """A hard cap on the tokens Tenure may spend in a day. Anyone can open a
+    PR on a public repository, and every verified PR costs model tokens out of
+    a fixed credit; past the cap the model isn't called and the PR is held,
+    the same way it is when Token Factory is down. Kept in a file, so a
+    restart doesn't reset it."""
+
+    def __init__(self, path: Path, tokens_per_day: int) -> None:
+        self.path, self.cap = path, tokens_per_day
+        self._lock = threading.Lock()
+
+    def _today(self) -> tuple[str, int]:
+        today = date.today().isoformat()
+        try:
+            data = json.loads(self.path.read_text())
+        except (OSError, ValueError):
+            data = {}
+        return today, int(data.get(today, 0))
+
+    def check(self) -> None:
+        _, used = self._today()
+        if used >= self.cap:
+            raise ModelError(f"today's model budget ({self.cap:,} tokens) is used up")
+
+    def spend(self, tokens: int) -> None:
+        with self._lock:
+            today, used = self._today()
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.path.write_text(json.dumps({today: used + max(0, tokens)}))
+
+
 class TokenFactory:
     def __init__(self, api_key: str, model: str = SUPER, base_url: str = ENDPOINT,
-                 client: httpx.Client | None = None) -> None:
+                 client: httpx.Client | None = None, budget: DailyBudget | None = None) -> None:
         self.model = model
+        self.budget = budget
         self.http = client or httpx.Client(base_url=base_url, timeout=120,
                                            headers={"Authorization": f"Bearer {api_key}"})
 
@@ -46,9 +81,14 @@ class TokenFactory:
         key = os.environ.get("NEBIUS_API_KEY")
         if not key:
             raise ModelError("NEBIUS_API_KEY isn't set")
-        return cls(key, model=os.environ.get("TENURE_MODEL", SUPER))
+        state = Path(os.environ.get("TENURE_STATE_DIR", "state"))
+        cap = int(os.environ.get("TENURE_DAILY_TOKENS", "300000"))
+        budget = DailyBudget(state / "model-budget.json", cap)
+        return cls(key, model=os.environ.get("TENURE_MODEL", SUPER), budget=budget)
 
     def complete(self, system: str, user: str, *, max_tokens: int = 4000) -> str:
+        if self.budget:
+            self.budget.check()
         try:
             r = self.http.post("chat/completions", json={
                 "model": self.model, "max_tokens": max_tokens, "temperature": 0,
@@ -58,6 +98,11 @@ class TokenFactory:
             raise ModelError(f"Token Factory unreachable: {exc}") from exc
         if r.status_code != 200:
             raise ModelError(f"Token Factory answered {r.status_code}: {r.text[:200]}")
+        if self.budget:
+            try:
+                self.budget.spend(int(r.json().get("usage", {}).get("total_tokens", max_tokens)))
+            except (ValueError, TypeError, AttributeError):
+                self.budget.spend(max_tokens)              # can't tell: count the most it could have been
         try:
             choice = r.json()["choices"][0]
             content = choice["message"]["content"] or ""
