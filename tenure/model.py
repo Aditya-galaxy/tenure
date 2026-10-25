@@ -19,6 +19,11 @@ import httpx
 
 ENDPOINT = "https://api.tokenfactory.us-central1.nebius.com/v1/"
 SUPER = "nvidia/nemotron-3-super-120b-a12b"
+# Nemotron 3 Super reasons before it answers, and its reasoning counts against
+# max_tokens. Left at the default it spent a whole 2,000-token budget thinking
+# about one repository and never wrote the answer. Asked for low effort, it
+# planned the same repository in 95 tokens and 2 seconds (24 Oct 2026).
+REASONING_EFFORT = os.environ.get("TENURE_REASONING_EFFORT", "low")
 
 
 class ModelError(RuntimeError):
@@ -26,7 +31,7 @@ class ModelError(RuntimeError):
 
 
 class Model(Protocol):
-    def complete(self, system: str, user: str, *, max_tokens: int = 2000) -> str: ...
+    def complete(self, system: str, user: str, *, max_tokens: int = 4000) -> str: ...
 
 
 class TokenFactory:
@@ -43,17 +48,23 @@ class TokenFactory:
             raise ModelError("NEBIUS_API_KEY isn't set")
         return cls(key, model=os.environ.get("TENURE_MODEL", SUPER))
 
-    def complete(self, system: str, user: str, *, max_tokens: int = 2000) -> str:
+    def complete(self, system: str, user: str, *, max_tokens: int = 4000) -> str:
         try:
             r = self.http.post("chat/completions", json={
                 "model": self.model, "max_tokens": max_tokens, "temperature": 0,
+                "reasoning_effort": REASONING_EFFORT,
                 "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]})
         except httpx.HTTPError as exc:
             raise ModelError(f"Token Factory unreachable: {exc}") from exc
         if r.status_code != 200:
             raise ModelError(f"Token Factory answered {r.status_code}: {r.text[:200]}")
         try:
-            return r.json()["choices"][0]["message"]["content"] or ""
+            choice = r.json()["choices"][0]
+            content = choice["message"]["content"] or ""
+            if not content and choice.get("finish_reason") == "length":
+                # Out of tokens before answering: say so, not "not JSON".
+                raise ModelError("the model ran out of tokens before answering")
+            return content
         except (KeyError, IndexError, ValueError) as exc:
             raise ModelError("Token Factory answer had no message") from exc
 
