@@ -1,0 +1,15 @@
+# Only the package goes into the image: see the COPY lines in Dockerfile.
+.git
+.github
+.venv
+data
+eval
+tests
+tools
+state
+deploy
+*.egg-info
+__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache

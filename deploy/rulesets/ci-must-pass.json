@@ -1,0 +1,5 @@
+{"name": "Tenure: CI must pass, even for Tenure", "target": "branch", "enforcement": "active",
+ "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}},
+ "rules": [{"type": "required_status_checks", "parameters": {"strict_required_status_checks_policy": false,
+   "required_status_checks": [{"context": "Build & Run Test Suite", "integration_id": 15368}]}}],
+ "bypass_actors": [{"actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always"}]}

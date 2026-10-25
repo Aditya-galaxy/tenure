@@ -260,3 +260,28 @@ def test_nemotron_is_asked_to_reason_briefly_and_running_out_is_said_plainly():
     assert sent["reasoning_effort"] == "low" and sent["max_tokens"] == 4000
     with pytest.raises(ModelError, match="ran out of tokens"):
         TokenFactory("k", client=answer(None, "length")).complete("s", "u")
+
+
+def test_past_the_daily_budget_the_model_is_not_called_and_the_pr_is_held(tmp_path):
+    import httpx
+
+    from tenure.model import DailyBudget, ModelError, TokenFactory
+
+    calls = []
+
+    def handler(request):
+        calls.append(1)
+        return httpx.Response(200, json={"choices": [{"message": {"content": "{}"}, "finish_reason": "stop"}],
+                                         "usage": {"total_tokens": 600}})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), base_url="https://tf.example/v1/")
+    budget = DailyBudget(tmp_path / "budget.json", tokens_per_day=1000)
+    model = TokenFactory("k", client=client, budget=budget)
+    model.complete("s", "u")
+    model.complete("s", "u")                                   # 1,200 used: over the cap now
+    with pytest.raises(ModelError, match="budget"):
+        model.complete("s", "u")
+    assert len(calls) == 2                                     # the third was never sent
+    # A restart reads the same file, so it doesn't reset the day.
+    with pytest.raises(ModelError, match="budget"):
+        TokenFactory("k", client=client, budget=DailyBudget(tmp_path / "budget.json", 1000)).complete("s", "u")

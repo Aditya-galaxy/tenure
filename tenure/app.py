@@ -65,7 +65,9 @@ def create_app(engine: Engine, secret: bytes) -> Starlette:
         ok, broken = engine.audit.verify()
         return JSONResponse({"ok": ok, "audit_broken_at": broken})
 
-    return Starlette(routes=[Route("/webhook", webhook, methods=["POST"]), Route("/healthz", healthz)])
+    # /health as well: some hosts' front ends keep /healthz for themselves.
+    return Starlette(routes=[Route("/webhook", webhook, methods=["POST"]), Route("/healthz", healthz),
+                             Route("/health", healthz)])
 
 
 def from_env() -> Starlette:

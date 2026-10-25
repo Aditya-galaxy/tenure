@@ -1,0 +1,2 @@
+# What a source deploy uploads: the same as the image needs.
+#!include:.dockerignore
