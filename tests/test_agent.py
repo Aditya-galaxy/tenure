@@ -236,3 +236,27 @@ def test_without_nebius_credentials_nothing_is_verified(monkeypatch):
     monkeypatch.delenv("NEBIUS_API_KEY", raising=False)
     monkeypatch.setenv("NEBIUS_PROJECT_ID", "p")
     assert isinstance(_verifier(), Unverified)
+
+
+def test_nemotron_is_asked_to_reason_briefly_and_running_out_is_said_plainly():
+    """Nemotron 3 Super reasons before answering, against max_tokens. Live, it
+    once spent a whole budget thinking and returned no answer at all."""
+    import json as _json
+
+    import httpx
+
+    from tenure.model import ModelError, TokenFactory
+
+    sent = {}
+
+    def answer(content, finish):
+        def handler(request):
+            sent.update(_json.loads(request.content))
+            return httpx.Response(200, json={"choices": [{"message": {"content": content},
+                                                          "finish_reason": finish}]})
+        return httpx.Client(transport=httpx.MockTransport(handler), base_url="https://tf.example/v1/")
+
+    assert TokenFactory("k", client=answer("{}", "stop")).complete("s", "u") == "{}"
+    assert sent["reasoning_effort"] == "low" and sent["max_tokens"] == 4000
+    with pytest.raises(ModelError, match="ran out of tokens"):
+        TokenFactory("k", client=answer(None, "length")).complete("s", "u")
