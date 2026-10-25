@@ -26,7 +26,7 @@ are exactly the ones `tenure/webhook.py` handles.
 
    GitHub sends your browser back to this machine, and the App's id, private
    key and webhook secret are saved to `~/.config/tenure/` (owner-only), never
-   to the repository or the terminal. If the name "Tenure" is taken, change it
+   to the repository or the terminal. The App is named "Tenure Merge" (GitHub reserves "Tenure"); if that is taken too, change it
    on GitHub's page before creating; nothing else depends on the name.
 2. **Install it** on the repositories to govern, from the link the last page
    gives you. Choose **Only select repositories** and start with hyperion-quant.

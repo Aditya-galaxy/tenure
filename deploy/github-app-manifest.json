@@ -1,5 +1,5 @@
 {
-  "name": "Tenure",
+  "name": "Tenure Merge",
   "url": "https://github.com/Aditya-galaxy/tenure",
   "description": "Decides which agent-written pull requests may merge without a human, and takes that right away when a merge goes wrong.",
   "public": false,
