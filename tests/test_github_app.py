@@ -383,3 +383,14 @@ def test_pull_files_paginates(keypair):
     http, _ = fake_github({**TOKEN, ("GET", f"/repos/{REPO}/pulls/12/files"): page})
     files = GitHubApp("1", keypair[0], http=http).installation(7).pull_files(REPO, 12)
     assert len(files) == 103 and files[0].path == "f1_0.md"
+
+
+def test_the_app_can_repoint_its_own_webhook(keypair):
+    sent = {}
+    def ok(r):
+        sent.update(json.loads(r.content), auth=r.headers["authorization"])
+        return httpx.Response(200, json={})
+    http, _ = fake_github({("PATCH", "/app/hook/config"): ok})
+    GitHubApp("1", keypair[0], http=http).set_webhook(url="https://x.example/webhook")
+    assert sent["url"] == "https://x.example/webhook" and "secret" not in sent
+    assert sent["auth"].startswith("Bearer ey")                   # the App's JWT, not an installation token
