@@ -171,6 +171,23 @@ def test_a_maintainer_grants_by_comment(parts):
     assert parts["store"].get(REPO, "dependabot", "deps_patch") is not None
 
 
+def test_a_grant_given_on_a_pr_decides_that_pr_again_at_once(parts):
+    """Live, the grant was recorded but the PR stayed held until GitHub's next
+    event for it. Granting from a PR is meant for that PR."""
+    inst = FakeInstallation()
+    engine(parts, inst, Passes()).commands(
+        RunCommands(REPO, 12, 1, "alice", "User", "/tenure grant dependabot deps_patch 30d because clean", "main",
+                    on_pull_request=True))
+    assert inst.merges == [{"n": 12, "sha": HEAD}]                 # verified and merged in the same delivery
+
+
+def test_a_grant_on_an_issue_decides_nothing(parts):
+    inst = FakeInstallation()
+    engine(parts, inst, Passes()).commands(
+        RunCommands(REPO, 12, 1, "alice", "User", "/tenure grant dependabot deps_patch 30d because clean", "main"))
+    assert inst.merges == [] and inst.checks == []
+
+
 def test_a_bot_command_is_refused_audited_and_not_answered(parts):
     inst = FakeInstallation(roles={"dependabot[bot]": "admin"})
     replies = engine(parts, inst).commands(

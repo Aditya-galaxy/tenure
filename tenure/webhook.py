@@ -74,6 +74,7 @@ class RunCommands:
     sender_type: str
     body: str
     default_branch: str
+    on_pull_request: bool = False         # the comment is on a PR, not an issue
 
 
 @dataclass(frozen=True)
@@ -120,7 +121,7 @@ def actions(event: str, payload: dict[str, Any]) -> list[Action]:
         user = comment.get("user") or {}
         issue = payload.get("issue") or {}
         return [RunCommands(repo, int(issue["number"]), int(inst), user.get("login", ""), user.get("type", ""),
-                            comment.get("body") or "", default)]
+                            comment.get("body") or "", default, on_pull_request="pull_request" in issue)]
 
     if event in ("workflow_run", "check_suite") and act == "completed":
         run = payload.get(event) or {}
