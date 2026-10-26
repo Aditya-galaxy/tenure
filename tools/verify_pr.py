@@ -24,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from tenure.agent import VerificationAgent
 from tenure.config import RepoPolicy
 from tenure.model import TokenFactory
-from tenure.sandbox import ContreeSandbox, Step
+from tenure.sandbox import ContreeSandbox, RemoteSandbox, Step
 
 
 class ReadOnlyGitHub:
@@ -77,7 +77,9 @@ def main() -> int:
     pr = gh.get(f"/repos/{repo}/pulls/{number}").json()
     head, base = pr["head"]["sha"], pr["base"]["sha"]
     print(f"{repo}#{number} {pr['title']!r}\n  base {base[:7]}  head {head[:7]}")
-    agent = VerificationAgent(Logged(ContreeSandbox()), TokenFactory.from_env())
+    runner = os.environ.get("TENURE_RUNNER_URL")
+    sandbox = RemoteSandbox(runner) if runner else ContreeSandbox()
+    agent = VerificationAgent(Logged(sandbox), TokenFactory.from_env())
     start = time.monotonic()
     v = agent.verify(repo, number, head, base, RepoPolicy(), source=gh)
     built = agent.built.get((repo, base))

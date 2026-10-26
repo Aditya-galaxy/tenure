@@ -87,8 +87,11 @@ def _verifier() -> Verifier:
         return Unverified()
     from .agent import VerificationAgent
     from .model import TokenFactory
-    from .sandbox import ContreeSandbox
-    return VerificationAgent(ContreeSandbox(), TokenFactory.from_env())
+    from .sandbox import ContreeSandbox, RemoteSandbox
+    # A runner of our own when one is configured; Nebius Sandboxes otherwise.
+    runner = os.environ.get("TENURE_RUNNER_URL")
+    sandbox = RemoteSandbox(runner) if runner else ContreeSandbox()
+    return VerificationAgent(sandbox, TokenFactory.from_env())
 
 
 def main() -> None:

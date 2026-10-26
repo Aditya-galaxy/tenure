@@ -1,0 +1,21 @@
+# Tenure's runner: where a pull request's code is built and tested.
+#
+# Deployed as its own service, private, under an identity with no
+# permissions and with no secrets. Toolchains: Rust (stable), Python 3, git.
+FROM rust:1-bookworm
+
+ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_BREAK_SYSTEM_PACKAGES=1 \
+    LANG=C.UTF-8
+RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends python3 python3-pip python3-venv git \
+    && rm -rf /var/lib/apt/lists/* && ln -sf /usr/bin/python3 /usr/local/bin/python
+
+WORKDIR /app
+COPY pyproject.toml README.md LICENSE ./
+COPY tenure ./tenure
+RUN pip3 install .
+
+RUN useradd --create-home --uid 10001 runner
+USER runner
+ENV TENURE_RUNNER_FAMILIES=rust,python,debian
+EXPOSE 8080
+CMD ["python3", "-m", "tenure.runner"]
