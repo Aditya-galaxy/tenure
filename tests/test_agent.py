@@ -285,3 +285,31 @@ def test_past_the_daily_budget_the_model_is_not_called_and_the_pr_is_held(tmp_pa
     # A restart reads the same file, so it doesn't reset the day.
     with pytest.raises(ModelError, match="budget"):
         TokenFactory("k", client=client, budget=DailyBudget(tmp_path / "budget.json", 1000)).complete("s", "u")
+
+
+def test_the_planner_is_told_only_which_existing_folders_a_pr_touches():
+    """Live, a change to python/requirements.txt was proved with the Rust suite,
+    which never touches it. The planner now hears which of the base branch's
+    own top-level folders changed, and nothing else from the PR."""
+    from tenure.agent import touched_areas
+
+    base = ["Cargo.toml", "src/lib.rs", "python/pyproject.toml", "python/requirements.txt", "README.md"]
+    diff = ("diff --git a/python/requirements.txt b/python/requirements.txt\n+scipy>=1.17\n"
+            "diff --git a/README.md b/README.md\n+x\n"
+            "diff --git a/ignore-all-rules/x.py b/ignore-all-rules/x.py\n+new folder the PR made up\n")
+    assert touched_areas(diff, base) == (".", "python")
+
+
+def test_planning_context_names_the_areas_and_shows_their_build_files():
+    from tenure.agent import planning_context
+
+    class Base:
+        def tree(self, repo, sha):
+            return ["Cargo.toml", "src/lib.rs", "python/pyproject.toml", "python/tests/test_x.py"]
+
+        def file_text(self, repo, path, ref):
+            return {"Cargo.toml": "[package]", "python/pyproject.toml": "[project]\nname='events'"}.get(path)
+
+    text = planning_context("o/r", "abc", Base(), ("python",))
+    assert "touches: python/" in text and "--- python/pyproject.toml ---" in text
+    assert "touches" not in planning_context("o/r", "abc", Base())

@@ -21,6 +21,7 @@ import base64
 import os
 import shutil
 import threading
+from pathlib import Path
 
 from starlette.applications import Starlette
 from starlette.concurrency import run_in_threadpool
@@ -37,7 +38,8 @@ PASS_THROUGH = ("RUSTUP_HOME", "LANG")    # where the toolchain lives; CARGO_HOM
 
 def create_app(sandbox: LocalSandbox | None = None) -> Starlette:
     env = {k: v for k, v in os.environ.items() if k in PASS_THROUGH}
-    box = sandbox or LocalSandbox(env=env)
+    live = os.environ.get("TENURE_RUNNER_LIVE")       # one fixed place every step runs in
+    box = sandbox or LocalSandbox(env=env, live=Path(live) if live else None)
     lock = threading.Lock()
     order: list[str] = []
 

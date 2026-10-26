@@ -16,6 +16,6 @@ RUN pip3 install .
 
 RUN useradd --create-home --uid 10001 runner
 USER runner
-ENV TENURE_RUNNER_FAMILIES=rust,python,debian
+ENV TENURE_RUNNER_FAMILIES=rust,python,debian TENURE_RUNNER_LIVE=/tmp/sandbox-live
 EXPOSE 8080
 CMD ["python3", "-m", "tenure.runner"]

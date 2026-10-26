@@ -65,10 +65,16 @@ class Sandbox(Protocol):
 class LocalSandbox:
     """Tests only: each state is a directory copy, and commands run on the host."""
 
-    def __init__(self, root: Path | None = None, env: dict[str, str] | None = None) -> None:
+    def __init__(self, root: Path | None = None, env: dict[str, str] | None = None,
+                 live: Path | None = None) -> None:
         self.root = Path(root or tempfile.mkdtemp(prefix="tenure-local-sandbox-"))
         self.states: dict[str, Path] = {}
         self.env = dict(env or {})            # e.g. where an installed toolchain lives (RUSTUP_HOME)
+        # With `live`, every step runs in the same place: the state is copied
+        # in, the command runs, and the result is copied out as the new state.
+        # Paths then never change between steps, which tools that record their
+        # own location need (a virtualenv's scripts name its absolute path).
+        self.live = Path(live) if live else None
 
     def image(self, name: str) -> str:
         state = f"image:{name}"
@@ -81,7 +87,19 @@ class LocalSandbox:
 
     def run(self, state: str, shell: str, *, files: dict[str, bytes] | None = None, timeout: int = 600) -> Step:
         new = self.root / uuid.uuid4().hex
-        shutil.copytree(self.states[state], new, symlinks=True)
+        if self.live:
+            shutil.rmtree(self.live, ignore_errors=True)
+            shutil.copytree(self.states[state], self.live, symlinks=True)
+            step = self._run_in(self.live, shell, files, timeout)
+            shutil.copytree(self.live, new, symlinks=True)
+        else:
+            shutil.copytree(self.states[state], new, symlinks=True)
+            step = self._run_in(new, shell, files, timeout)
+        name = f"local:{new.name}"
+        self.states[name] = new
+        return Step(name, step.exit_code, step.stdout, step.stderr)
+
+    def _run_in(self, new: Path, shell: str, files: dict[str, bytes] | None, timeout: int) -> Step:
         mapped = {WORKDIR: new / "work", INBOX: new / "inbox"}
         for path, content in (files or {}).items():
             prefix = next((p for p in mapped if path.startswith(p + "/")), None)
@@ -94,16 +112,23 @@ class LocalSandbox:
         # would match inside the first rewrite (on Linux this sandbox's own
         # directory is /tmp/tenure-local-sandbox-..., which starts with INBOX).
         shell = _PATHS.sub(lambda m: str(mapped[m.group(1)]), shell)
-        env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), **self.env, "HOME": str(new / "home")}
+        home = new / "home"
+        # Tools a step installs for its own user land in this snapshot's home,
+        # so they're on PATH here and carried, like everything else, only into
+        # the snapshots that come after it.
+        work = mapped[WORKDIR]
+        # A virtualenv made in the working folder is on PATH for every later
+        # step: each command is its own shell, so `activate` can't carry over.
+        path = (f"{work}/.venv/bin:{work}/venv/bin:{home}/.local/bin:{home}/.cargo/bin:"
+                f"{os.environ.get('PATH', '/usr/bin:/bin')}")
+        env = {**self.env, "PATH": path, "HOME": str(home)}
         try:
             p = subprocess.run(["/bin/bash", "-c", shell], cwd=new / "work", env=env,  # noqa: S603
                                capture_output=True, text=True, timeout=timeout, check=False)
             code, out, err = p.returncode, p.stdout, p.stderr
         except subprocess.TimeoutExpired:
             code, out, err = 124, "", f"timed out after {timeout}s"
-        name = f"local:{new.name}"
-        self.states[name] = new
-        return Step(name, code, out, err)
+        return Step("", code, out, err)
 
 
 class ContreeSandbox:
@@ -177,7 +202,14 @@ class RemoteSandbox:
         return r.text
 
     def _post(self, path: str, body: dict) -> dict:
-        r = self.http.post(f"{self.url}{path}", json=body, headers={"Authorization": f"Bearer {self._token()}"})
+        import time
+        # 429 and 503 mean the runner is busy with another run or still
+        # starting: it runs one thing at a time. Wait rather than fail.
+        for wait in (5, 15, 30, 60, 90, 0):
+            r = self.http.post(f"{self.url}{path}", json=body, headers={"Authorization": f"Bearer {self._token()}"})
+            if r.status_code not in (429, 503) or not wait:
+                break
+            time.sleep(wait)
         if r.status_code != 200:
             raise RuntimeError(f"the runner answered {r.status_code}: {r.text[:300]}")
         return r.json()
