@@ -10,15 +10,17 @@ Factory Sandboxes (ConTree) work, and `ContreeSandbox` wraps them.
 Nothing Tenure holds goes into a sandbox: no GitHub token, no API key, no
 environment. The code under test is untrusted and is treated that way.
 
-`LocalSandbox` runs commands on this machine, in temporary directories, with
-no isolation at all. It exists so the verification agent can be tested
-end to end against a known-good fixture repo. It is never selected by
-configuration and must never be pointed at a real pull request.
+`LocalSandbox` runs commands on the machine it is on, in temporary
+directories, with no isolation of its own. Tenure itself never runs it on a
+real pull request: the tests use it against a fixture repo, and the runner
+service (tenure/runner.py) uses it inside a container of its own that holds
+no credentials. `RemoteSandbox` is how Tenure talks to that runner.
 """
 
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -29,6 +31,9 @@ from typing import Protocol
 
 WORKDIR = "/work"
 INBOX = "/tmp/tenure"  # noqa: S108 -- a path inside the sandbox, where Tenure puts what it uploads
+
+
+_PATHS = re.compile(rf"(?<![\w/.-])({re.escape(INBOX)}|{re.escape(WORKDIR)})(?![\w.-])")
 
 
 @dataclass(frozen=True)
@@ -60,9 +65,16 @@ class Sandbox(Protocol):
 class LocalSandbox:
     """Tests only: each state is a directory copy, and commands run on the host."""
 
-    def __init__(self, root: Path | None = None) -> None:
+    def __init__(self, root: Path | None = None, env: dict[str, str] | None = None,
+                 live: Path | None = None) -> None:
         self.root = Path(root or tempfile.mkdtemp(prefix="tenure-local-sandbox-"))
         self.states: dict[str, Path] = {}
+        self.env = dict(env or {})            # e.g. where an installed toolchain lives (RUSTUP_HOME)
+        # With `live`, every step runs in the same place: the state is copied
+        # in, the command runs, and the result is copied out as the new state.
+        # Paths then never change between steps, which tools that record their
+        # own location need (a virtualenv's scripts name its absolute path).
+        self.live = Path(live) if live else None
 
     def image(self, name: str) -> str:
         state = f"image:{name}"
@@ -75,7 +87,19 @@ class LocalSandbox:
 
     def run(self, state: str, shell: str, *, files: dict[str, bytes] | None = None, timeout: int = 600) -> Step:
         new = self.root / uuid.uuid4().hex
-        shutil.copytree(self.states[state], new, symlinks=True)
+        if self.live:
+            shutil.rmtree(self.live, ignore_errors=True)
+            shutil.copytree(self.states[state], self.live, symlinks=True)
+            step = self._run_in(self.live, shell, files, timeout)
+            shutil.copytree(self.live, new, symlinks=True)
+        else:
+            shutil.copytree(self.states[state], new, symlinks=True)
+            step = self._run_in(new, shell, files, timeout)
+        name = f"local:{new.name}"
+        self.states[name] = new
+        return Step(name, step.exit_code, step.stdout, step.stderr)
+
+    def _run_in(self, new: Path, shell: str, files: dict[str, bytes] | None, timeout: int) -> Step:
         mapped = {WORKDIR: new / "work", INBOX: new / "inbox"}
         for path, content in (files or {}).items():
             prefix = next((p for p in mapped if path.startswith(p + "/")), None)
@@ -84,18 +108,27 @@ class LocalSandbox:
             target = mapped[prefix] / path[len(prefix) + 1:]
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(content)
-        for prefix, local in mapped.items():
-            shell = shell.replace(prefix, str(local))
-        env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(new / "home")}
+        # One pass, whole paths only: rewriting one prefix and then the next
+        # would match inside the first rewrite (on Linux this sandbox's own
+        # directory is /tmp/tenure-local-sandbox-..., which starts with INBOX).
+        shell = _PATHS.sub(lambda m: str(mapped[m.group(1)]), shell)
+        home = new / "home"
+        # Tools a step installs for its own user land in this snapshot's home,
+        # so they're on PATH here and carried, like everything else, only into
+        # the snapshots that come after it.
+        work = mapped[WORKDIR]
+        # A virtualenv made in the working folder is on PATH for every later
+        # step: each command is its own shell, so `activate` can't carry over.
+        path = (f"{work}/.venv/bin:{work}/venv/bin:{home}/.local/bin:{home}/.cargo/bin:"
+                f"{os.environ.get('PATH', '/usr/bin:/bin')}")
+        env = {**self.env, "PATH": path, "HOME": str(home)}
         try:
             p = subprocess.run(["/bin/bash", "-c", shell], cwd=new / "work", env=env,  # noqa: S603
                                capture_output=True, text=True, timeout=timeout, check=False)
             code, out, err = p.returncode, p.stdout, p.stderr
         except subprocess.TimeoutExpired:
             code, out, err = 124, "", f"timed out after {timeout}s"
-        name = f"local:{new.name}"
-        self.states[name] = new
-        return Step(name, code, out, err)
+        return Step("", code, out, err)
 
 
 class ContreeSandbox:
@@ -141,3 +174,51 @@ def _text(stream: object) -> str:
         data = stream.read()
         return data.decode("utf-8", "replace") if isinstance(data, bytes) else str(data)
     return str(stream or "")
+
+
+class RemoteSandbox:
+    """The runner service (tenure/runner.py) over HTTPS.
+
+    The runner is a separate service with no credentials of its own, so the
+    PR's code never runs where Tenure's keys are. Each request carries an
+    identity token for the runner's address, which only Tenure's own service
+    account may call; the token comes from the platform's metadata server, or
+    from TENURE_RUNNER_TOKEN when run by hand.
+    """
+
+    METADATA = ("http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity"
+                "?audience={audience}")
+
+    def __init__(self, url: str, client: object | None = None) -> None:
+        import httpx
+        self.url = url.rstrip("/")
+        self.http = client or httpx.Client(timeout=3700)
+
+    def _token(self) -> str:
+        if token := os.environ.get("TENURE_RUNNER_TOKEN"):
+            return token
+        r = self.http.get(self.METADATA.format(audience=self.url), headers={"Metadata-Flavor": "Google"}, timeout=10)
+        r.raise_for_status()
+        return r.text
+
+    def _post(self, path: str, body: dict) -> dict:
+        import time
+        # 429 and 503 mean the runner is busy with another run or still
+        # starting: it runs one thing at a time. Wait rather than fail.
+        for wait in (5, 15, 30, 60, 90, 0):
+            r = self.http.post(f"{self.url}{path}", json=body, headers={"Authorization": f"Bearer {self._token()}"})
+            if r.status_code not in (429, 503) or not wait:
+                break
+            time.sleep(wait)
+        if r.status_code != 200:
+            raise RuntimeError(f"the runner answered {r.status_code}: {r.text[:300]}")
+        return r.json()
+
+    def image(self, name: str) -> str:
+        return self._post("/image", {"name": name})["state"]
+
+    def run(self, state: str, shell: str, *, files: dict[str, bytes] | None = None, timeout: int = 600) -> Step:
+        import base64
+        d = self._post("/run", {"state": state, "shell": shell, "timeout": timeout,
+                                "files": {k: base64.b64encode(v).decode() for k, v in (files or {}).items()}})
+        return Step(d["state"], d["exit_code"], d["stdout"], d["stderr"])

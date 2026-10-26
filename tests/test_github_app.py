@@ -171,6 +171,23 @@ def test_a_maintainer_grants_by_comment(parts):
     assert parts["store"].get(REPO, "dependabot", "deps_patch") is not None
 
 
+def test_a_grant_given_on_a_pr_decides_that_pr_again_at_once(parts):
+    """Live, the grant was recorded but the PR stayed held until GitHub's next
+    event for it. Granting from a PR is meant for that PR."""
+    inst = FakeInstallation()
+    engine(parts, inst, Passes()).commands(
+        RunCommands(REPO, 12, 1, "alice", "User", "/tenure grant dependabot deps_patch 30d because clean", "main",
+                    on_pull_request=True))
+    assert inst.merges == [{"n": 12, "sha": HEAD}]                 # verified and merged in the same delivery
+
+
+def test_a_grant_on_an_issue_decides_nothing(parts):
+    inst = FakeInstallation()
+    engine(parts, inst, Passes()).commands(
+        RunCommands(REPO, 12, 1, "alice", "User", "/tenure grant dependabot deps_patch 30d because clean", "main"))
+    assert inst.merges == [] and inst.checks == []
+
+
 def test_a_bot_command_is_refused_audited_and_not_answered(parts):
     inst = FakeInstallation(roles={"dependabot[bot]": "admin"})
     replies = engine(parts, inst).commands(
@@ -394,3 +411,30 @@ def test_the_app_can_repoint_its_own_webhook(keypair):
     GitHubApp("1", keypair[0], http=http).set_webhook(url="https://x.example/webhook")
     assert sent["url"] == "https://x.example/webhook" and "secret" not in sent
     assert sent["auth"].startswith("Bearer ey")                   # the App's JWT, not an installation token
+
+
+def test_the_public_page_shows_decisions_and_never_a_secret(parts):
+    from tenure import dashboard
+    grant(parts)
+    inst = FakeInstallation()
+    eng = engine(parts, inst, Passes())
+    eng.evaluate(EVAL)
+    html = dashboard.page(eng)
+    data = dashboard.state(eng)
+    assert data["audit"]["verifies"] is True and len(data["merges"]) == 1
+    assert "verifies end to end" in html and "Merged" in html and "dependabot" in html
+    assert "<script" not in html                                  # nothing runs on it
+
+def test_the_page_escapes_what_it_shows(parts):
+    from tenure import dashboard
+    parts["audit"].record("decision", {"repo": REPO, "pr": 7, "agent": "<img src=x onerror=alert(1)>",
+                                       "class": "docs", "verdict": "hold", "reasons": ["<b>x</b>"]})
+    html = dashboard.page(engine(parts, FakeInstallation()))
+    assert "<img src=x" not in html and "&lt;img src=x" in html
+
+
+def test_a_grant_reads_as_a_sentence_on_the_page(parts):
+    from tenure import dashboard
+    grant(parts)
+    html = dashboard.page(engine(parts, FakeInstallation()))
+    assert "<b>dependabot</b> may merge <b>deps_patch</b>" in html and "by @alice" in html

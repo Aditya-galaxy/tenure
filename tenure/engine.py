@@ -140,19 +140,26 @@ class Engine:
         inst = self.installation(a.installation)
         policy, _ = self._policy(inst, a.repo, a.default_branch)
         replies = []
+        recheck = False
         for line in lines:
             try:
                 cmd = parse(line)
             except CommandError as exc:
                 replies.append(f"Didn't understand that command: {exc}")
                 continue
-            replies.append(execute(cmd, repo=a.repo, sender=a.sender, sender_type=a.sender_type,
-                                   permission_of=lambda login: inst.role(a.repo, login),
-                                   store=self.store, switch=self.switch, policy=policy, now=self.clock()))
+            reply = execute(cmd, repo=a.repo, sender=a.sender, sender_type=a.sender_type,
+                            permission_of=lambda login: inst.role(a.repo, login),
+                            store=self.store, switch=self.switch, policy=policy, now=self.clock())
+            replies.append(reply)
+            recheck |= reply.startswith(("Granted:", "Resumed:"))
         # A bot's command is refused and audited, but never answered: two bots
         # replying to each other is an endless loop.
         if a.sender_type == "User":
             inst.comment(a.repo, a.number, "\n\n".join(replies))
+        # A grant given on a PR is usually meant for that PR: decide it again
+        # now, not on GitHub's next event for it, which may be days away.
+        if recheck and a.on_pull_request:
+            self.evaluate(EvaluatePR(a.repo, a.number, a.installation, a.default_branch))
         return replies
 
     # ── evidence ─────────────────────────────────────────────────────────────

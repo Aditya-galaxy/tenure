@@ -174,24 +174,26 @@ def count_tests(framework: str, output: str) -> int | None:
 class VerificationAgent:
     def __init__(self, sandbox: Sandbox, model: Model, *, repairs: int = MAX_REPAIRS) -> None:
         self.sandbox, self.model, self.repairs = sandbox, model, repairs
-        self.built: dict[tuple[str, str], Built] = {}
+        self.built: dict[tuple[str, str, tuple[str, ...]], Built] = {}
 
     # The Verifier protocol (verify.py).
     def verify(self, repo: str, number: int, head_sha: str, base_sha: str,
                policy: config.RepoPolicy, *, source: Source) -> Verification:
         try:
-            built = self.build(repo, base_sha, source)
-            return self.check(repo, number, head_sha, base_sha, built, source)
+            diff = source.compare_diff(repo, base_sha, head_sha)
+            areas = touched_areas(diff, source.tree(repo, base_sha))
+            built = self.build(repo, base_sha, source, areas)
+            return self.check(repo, number, head_sha, base_sha, built, source, diff=diff)
         except (Unverifiable, ModelError) as exc:
             return Verification(head_sha, tests_passed=False, tests_before=0, tests_after=0, reversible=False,
                                 problem=str(exc), brief=f"Tenure couldn't verify this PR: {exc}")
 
     # ── planning and building: base branch only ─────────────────────────────
 
-    def build(self, repo: str, base_sha: str, source: Source) -> Built:
-        if (repo, base_sha) in self.built:
-            return self.built[(repo, base_sha)]
-        context = planning_context(repo, base_sha, source)
+    def build(self, repo: str, base_sha: str, source: Source, areas: tuple[str, ...] = ()) -> Built:
+        if (repo, base_sha, areas) in self.built:
+            return self.built[(repo, base_sha, areas)]
+        context = planning_context(repo, base_sha, source, areas)
         recipe = Recipe.parse(self.model.complete(PLANNER, context))
         tarball = source.tarball(repo, base_sha)
         if len(tarball) > MAX_TARBALL:
@@ -215,7 +217,7 @@ class VerificationAgent:
                 log.append(f"$ {recipe.test} → {'pass' if baseline.passed else 'FAIL'}, {baseline.count} tests")
                 if baseline.passed and baseline.count:
                     built = Built(recipe, state, baseline, log)
-                    self.built[(repo, base_sha)] = built
+                    self.built[(repo, base_sha, areas)] = built
                     return built
                 why = "no test summary found in the output" if not baseline.count else "tests failed"
                 failed = (recipe.test, Step(state, 1, baseline.output, why))
@@ -239,8 +241,8 @@ class VerificationAgent:
     # ── checking the PR: fixed steps, fixed rules ───────────────────────────
 
     def check(self, repo: str, number: int, head_sha: str, base_sha: str, built: Built,
-              source: Source) -> Verification:
-        diff = source.compare_diff(repo, base_sha, head_sha)
+              source: Source, *, diff: str | None = None) -> Verification:
+        diff = source.compare_diff(repo, base_sha, head_sha) if diff is None else diff
         if len(diff) > MAX_DIFF:
             raise Unverifiable("the diff is too large to apply in a sandbox")
         applied = self.sandbox.run(built.checkpoint, _APPLY, files={f"{INBOX}/pr.diff": diff.encode()})
@@ -292,20 +294,46 @@ eclipse-temurin, maven, gradle, ubuntu, debian>",
  "framework": "<one of {', '.join(FRAMEWORKS)}>"}}
 
 The repository is already unpacked in {WORKDIR}, which is the working directory for every command.
-Commands run as root, non-interactively, with network access for installing dependencies. There are
-no secrets, databases or other services. Pick the image and toolchain version the CI files use.
+Commands run non-interactively, with network access for installing dependencies, possibly as an
+ordinary user: install Python packages into a virtualenv inside {WORKDIR} (or with pip's --user),
+and don't write outside {WORKDIR} and $HOME. Each command runs in a shell of its own, so cd, source and
+export don't carry over to the next: call tools by path (for example .venv/bin/pytest), or chain
+with &&. There are no secrets, databases or other services.
+Pick the image and toolchain version the CI files use.
 Setup installs the toolchain's extra tools and the project's dependencies and builds it; at most 12
 commands. Choose the test command CI uses, restricted to tests that need no network or services,
 and make it print the framework's normal summary (for Go, use `go test -v`; for pytest, don't pass -q
 twice or --no-summary). Don't change repository files."""
 
 
-def planning_context(repo: str, base_sha: str, source: Source) -> str:
+def touched_areas(diff: str, base_paths: list[str], *, most: int = 5) -> tuple[str, ...]:
+    """The top-level folders a diff changes, as names that already exist on the
+    base branch ("." for files at the root). Only names chosen from the base
+    tree are returned, so nothing the PR writes reaches the planner but which
+    of the repository's own folders it touched."""
+    folders = {p.split("/", 1)[0] for p in base_paths if "/" in p}
+    touched = set()
+    for m in re.finditer(r"^diff --git a/(\S+) b/(\S+)$", diff, flags=re.M):
+        for path in m.groups():
+            top = path.split("/", 1)[0] if "/" in path else "."
+            if top == "." or top in folders:
+                touched.add(top)
+    return tuple(sorted(touched))[:most]
+
+
+def planning_context(repo: str, base_sha: str, source: Source, areas: tuple[str, ...] = ()) -> str:
     paths = source.tree(repo, base_sha)
     shown = sorted(p for p in paths if p.count("/") <= 1)[:400]
     parts = [f"Repository: {repo}", "Files (top two levels):", "\n".join(shown)]
+    if areas:
+        named = ", ".join("the repository root" if a == "." else f"{a}/" for a in areas)
+        parts.append(f"\nThe change being checked touches: {named}. Choose the image, setup and test command "
+                     "for the test suite that covers those parts (for a folder with its own package, run that "
+                     "package's tests from inside it). Only if none of the repository's suites covers them, run "
+                     "the main suite.")
+    wanted = PLAN_FILES + tuple(f"{a}/{g}" for a in areas if a != "." for g in PLAN_FILES)
     budget = PLAN_BUDGET
-    for path in sorted(p for p in paths if any(fnmatch(p, g) for g in PLAN_FILES)):
+    for path in sorted(p for p in paths if any(fnmatch(p, g) for g in wanted)):
         text = source.file_text(repo, path, base_sha)
         if not text:
             continue

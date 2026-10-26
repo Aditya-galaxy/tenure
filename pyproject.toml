@@ -24,6 +24,7 @@ ignore = ["S101"]   # assert is how pytest works
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S105", "S106", "S603", "S607"]   # tests drive git on fixture repos they create
+"tenure/dashboard.py" = ["E501"]   # an HTML template reads better unwrapped
 
 [tool.setuptools]
 # Named explicitly: with deploy/ beside tenure/, auto-discovery can't tell which
