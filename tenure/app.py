@@ -19,9 +19,10 @@ from pathlib import Path
 from starlette.applications import Starlette
 from starlette.background import BackgroundTask
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import HTMLResponse, JSONResponse
 from starlette.routing import Route
 
+from . import dashboard
 from .audit import AuditLog
 from .engine import Engine
 from .github import GitHubApp
@@ -65,9 +66,15 @@ def create_app(engine: Engine, secret: bytes) -> Starlette:
         ok, broken = engine.audit.verify()
         return JSONResponse({"ok": ok, "audit_broken_at": broken})
 
+    async def home(_: Request) -> HTMLResponse:
+        return HTMLResponse(dashboard.page(engine))
+
+    async def api_state(_: Request) -> JSONResponse:
+        return JSONResponse(dashboard.state(engine))
+
     # /health as well: some hosts' front ends keep /healthz for themselves.
     return Starlette(routes=[Route("/webhook", webhook, methods=["POST"]), Route("/healthz", healthz),
-                             Route("/health", healthz)])
+                             Route("/health", healthz), Route("/", home), Route("/api/state", api_state)])
 
 
 def from_env() -> Starlette:

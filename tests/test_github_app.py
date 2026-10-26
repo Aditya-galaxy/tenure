@@ -411,3 +411,30 @@ def test_the_app_can_repoint_its_own_webhook(keypair):
     GitHubApp("1", keypair[0], http=http).set_webhook(url="https://x.example/webhook")
     assert sent["url"] == "https://x.example/webhook" and "secret" not in sent
     assert sent["auth"].startswith("Bearer ey")                   # the App's JWT, not an installation token
+
+
+def test_the_public_page_shows_decisions_and_never_a_secret(parts):
+    from tenure import dashboard
+    grant(parts)
+    inst = FakeInstallation()
+    eng = engine(parts, inst, Passes())
+    eng.evaluate(EVAL)
+    html = dashboard.page(eng)
+    data = dashboard.state(eng)
+    assert data["audit"]["verifies"] is True and len(data["merges"]) == 1
+    assert "verifies end to end" in html and "Merged" in html and "dependabot" in html
+    assert "<script" not in html                                  # nothing runs on it
+
+def test_the_page_escapes_what_it_shows(parts):
+    from tenure import dashboard
+    parts["audit"].record("decision", {"repo": REPO, "pr": 7, "agent": "<img src=x onerror=alert(1)>",
+                                       "class": "docs", "verdict": "hold", "reasons": ["<b>x</b>"]})
+    html = dashboard.page(engine(parts, FakeInstallation()))
+    assert "<img src=x" not in html and "&lt;img src=x" in html
+
+
+def test_a_grant_reads_as_a_sentence_on_the_page(parts):
+    from tenure import dashboard
+    grant(parts)
+    html = dashboard.page(engine(parts, FakeInstallation()))
+    assert "<b>dependabot</b> may merge <b>deps_patch</b>" in html and "by @alice" in html
