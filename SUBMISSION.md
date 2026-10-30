@@ -12,6 +12,19 @@ Solo entry by Aditya (GitHub `Aditya-galaxy`).
 | Video | _link to be added_ |
 | Feedback on Nebius and NVIDIA tools | [NEBIUS_FEEDBACK.md](NEBIUS_FEEDBACK.md) |
 
+## Submission requirements, one by one
+
+| Requirement | How Tenure meets it |
+|---|---|
+| Runs on Nebius Token Factory or Nebius AI Cloud | Every model call goes to **Nebius Token Factory** at runtime (`tenure/model.py`, `https://api.tokenfactory.us-central1.nebius.com/v1/`). The live App made these calls to verify hyperion #43 and #44 |
+| At least one NVIDIA open model | **NVIDIA Nemotron 3 Super** (`nvidia/nemotron-3-super-120b-a12b`) plans and repairs every verification |
+| Public repository, OSI licence | https://github.com/Aditya-galaxy/tenure, **Apache-2.0** (`LICENSE`, shown in About) |
+| README: setup, and how Nemotron, Token Factory and Sandboxes are used | [README.md](README.md): "How it uses Nemotron, Token Factory and Sandboxes" and "Run it" |
+| Working demo, free for judges until 15 Dec | The live page above, and the App on hyperion. No sign-in; both stay up until 15 Dec 2026 |
+| Video under 3 minutes | 1 min 58 s, on YouTube (link above) |
+| Feedback on Nebius and NVIDIA tools | [NEBIUS_FEEDBACK.md](NEBIUS_FEEDBACK.md) |
+| Track | Coding and Agentic Engineering |
+
 ## In one sentence
 
 GitHub's Agent Merge merges as soon as GitHub allows; **Tenure decides what
@@ -129,8 +142,7 @@ finally explained it.
 
 Delete this section once every box is ticked.
 
-- [ ] Merge Tenure PR #11 so `main` is what's deployed.
-- [ ] Record the video (under 3 minutes, YouTube, public) and put its link in the table above.
+- [ ] Upload `tenure-demo.mp4` to YouTube (public) and put its link in the table above.
 - [ ] Make the repository public; check the licence shows in the About section.
-- [ ] Devpost: name the track (Coding and Agentic Engineering), paste the description, the demo URL and the feedback, and submit by Thu 29 Oct (hard deadline Fri 30 Oct, 22:30 IST).
+- [ ] Devpost: name the track (Coding and Agentic Engineering), paste the description, the demo URL and the feedback, and submit by Fri 30 Oct, 10:00 PT (22:30 IST).
 - [ ] Keep both services running and free for judges until 15 Dec.
